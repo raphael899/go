@@ -1,0 +1,103 @@
+on:
+  push:
+    branches: [ master ]
+  pull_request:
+name: Test
+env:
+    GOPROXY: https://proxy.golang.org
+    GO111MODULE: on
+    DART_SASS_VERSION: 1.56.2
+    DART_SASS_SHA_LINUX: 9e4f455f7b8619959d7878af2862383be58392eb963a14ff87cc512c03701e2a
+    DART_SASS_SHA_MACOS: 5992e979e2c30ec363f8e338822bb2b4443c74232b3340501a76180f5652cb09
+    DART_SASS_SHA_WINDOWS: 8d3d9117c54840e3e6a4919e43acf75ea52f28a64fc87a8e29d80ec72ee36cfb
+permissions:
+  contents: read
+jobs:
+  test:
+    strategy:
+      matrix:
+        go-version: [1.19.x,1.20.x]
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@93ea575cb5d8a053eaa0ac8fa3b40d7e05a33cc8
+    - name: Install Go
+      uses: actions/setup-go@268d8c0ca0432bb2cf416faae41297df9d262d7f
+      with:
+        go-version: ${{ matrix.go-version }}
+        check-latest: true
+        cache: true
+        cache-dependency-path: |
+          **/go.sum
+          **/go.mod
+    - name: Install Ruby
+      uses: ruby/setup-ruby@ee2113536afb7f793eed4ce60e8d3b26db912da4
+      with:
+        ruby-version: '2.7' 
+        bundler-cache: true #
+    - name: Install Python
+      uses: actions/setup-python@3105fb18c05ddd93efea5f9e0bef7a03a6e9e7df
+      with:
+        python-version: '3.x'
+    - name: Install Mage
+      run: go install github.com/magefile/mage@07afc7d24f4d6d6442305d49552f04fbda5ccb3e
+    - name: Install asciidoctor
+      uses: reitzig/actions-asciidoctor@7570212ae20b63653481675fb1ff62d1073632b0
+    - name: Install docutils
+      run: |
+        pip install docutils
+        rst2html.py --version
+    - if: matrix.os == 'ubuntu-latest'
+      name: Install pandoc on Linux
+      run: |
+          sudo apt-get update -y
+          sudo apt-get install -y pandoc
+    - if: matrix.os == 'macos-latest'
+      run: |
+        brew install pandoc
+    - if: matrix.os == 'windows-latest'
+      run: |
+        Choco-Install -PackageName pandoc
+    - run: pandoc -v
+    - if: matrix.os == 'windows-latest'
+      run: |
+        Choco-Install -PackageName mingw -ArgumentList "--version","10.2.0","--allow-downgrade"
+    - if: matrix.os == 'ubuntu-latest'
+      name: Install dart-sass-embedded Linux
+      run: |
+        echo "Install Dart Sass version ${DART_SASS_VERSION} ..."
+        curl -LJO "https://github.com/sass/dart-sass-embedded/releases/download/${DART_SASS_VERSION}/sass_embedded-${DART_SASS_VERSION}-linux-x64.tar.gz";
+        echo "${DART_SASS_SHA_LINUX}  sass_embedded-${DART_SASS_VERSION}-linux-x64.tar.gz" | sha256sum -c;
+        tar -xvf "sass_embedded-${DART_SASS_VERSION}-linux-x64.tar.gz";
+        echo "$GITHUB_WORKSPACE/sass_embedded/" >> $GITHUB_PATH
+    - if: matrix.os == 'macos-latest'
+      name: Install dart-sass-embedded MacOS
+      run: |
+        echo "Install Dart Sass version ${DART_SASS_VERSION} ..."
+        curl -LJO "https://github.com/sass/dart-sass-embedded/releases/download/${DART_SASS_VERSION}/sass_embedded-${DART_SASS_VERSION}-macos-x64.tar.gz";
+        echo "${DART_SASS_SHA_MACOS}  sass_embedded-${DART_SASS_VERSION}-macos-x64.tar.gz" | shasum -a 256 -c;
+        tar -xvf "sass_embedded-${DART_SASS_VERSION}-macos-x64.tar.gz";
+        echo "$GITHUB_WORKSPACE/sass_embedded/" >> $GITHUB_PATH
+    - if: matrix.os == 'windows-latest'
+      name: Install dart-sass-embedded Windows
+      run: |
+        echo "Install Dart Sass version ${env:DART_SASS_VERSION} ..."
+        curl -LJO "https://github.com/sass/dart-sass-embedded/releases/download/${env:DART_SASS_VERSION}/sass_embedded-${env:DART_SASS_VERSION}-windows-x64.zip";
+        Expand-Archive -Path "sass_embedded-${env:DART_SASS_VERSION}-windows-x64.zip" -DestinationPath .;
+        echo  "$env:GITHUB_WORKSPACE/sass_embedded/" | Out-File -FilePath $Env:GITHUB_PATH -Encoding utf-8 -Append
+    - name: Check
+      run: |
+        mage -v check;
+      env:
+        HUGO_BUILD_TAGS: extended
+    - name: Build Docs
+      env:
+        HUGO_BUILD_TAGS: extended
+        HUGO_TIMEOUT: 31000
+        HUGO_IGNOREERRORS: error-remote-getjson
+        HUGO_SERVICES_INSTAGRAM_ACCESSTOKEN: dummytoken
+      run: |
+        mage -v hugo
+        ./hugo -s docs/
+        ./hugo --renderToMemory -s docs/
